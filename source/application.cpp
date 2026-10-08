@@ -20,7 +20,7 @@ struct UniformBufferObject{
     glm::vec4 userColor;
 };
 
-std::vector<Vertex> generateIcosahedron(); 
+std::vector<Vertex> generateIcosahedron();
 
 VkShaderModule vertShaderModule = VK_NULL_HANDLE;
 VkShaderModule fragShaderModule = VK_NULL_HANDLE;
@@ -146,8 +146,8 @@ bool initialize() {
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_FALSE;
-    depthStencil.depthWriteEnable = VK_FALSE;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
@@ -234,7 +234,6 @@ bool initialize() {
     uboAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     uboAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-
     VmaAllocationInfo uboAllocResult{};
     if (vmaCreateBuffer(context.allocator, &uboBufferInfo, &uboAllocInfo,
                     &uniformBuffer, &uniformAllocation, &uboAllocResult) != VK_SUCCESS) {
@@ -264,7 +263,6 @@ bool initialize() {
     }
     std::cerr << "Uniform buffer created\n";
 
-
     VkDescriptorBufferInfo bufferDescriptorInfo{};
     bufferDescriptorInfo.buffer = uniformBuffer;
     bufferDescriptorInfo.offset = 0;
@@ -273,7 +271,7 @@ bool initialize() {
     VkWriteDescriptorSet descriptorWrite{};
     descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     descriptorWrite.dstSet = descriptorSet;
-    descriptorWrite.dstBinding = 0;;
+    descriptorWrite.dstBinding = 0;
     descriptorWrite.descriptorCount = 1;
     descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptorWrite.pBufferInfo = &bufferDescriptorInfo;
@@ -323,13 +321,12 @@ bool initialize() {
     void* data = nullptr;
     vmaMapMemory(context.allocator, vertexAllocation, &data);
 
-    // ИСПОЛЬЗУЙ РЕАЛЬНЫЙ РАЗМЕР ДАННЫХ, А НЕ bufferInfo.size!
     size_t dataSize = vertices.size() * sizeof(Vertex);
     memcpy(data, vertices.data(), dataSize);
-
+    vmaFlushAllocation(context.allocator, vertexAllocation, 0, dataSize);
     vmaUnmapMemory(context.allocator, vertexAllocation);
 
-    std::cerr << "Copied " << vertices.size() << " vertices (" 
+    std::cerr << "Copied " << vertices.size() << " vertices ("
             << dataSize << " bytes) to GPU buffer" << std::endl;
     return true;
 }
@@ -385,10 +382,8 @@ void update([[maybe_unused]] double time) {
         graphics::internal::context.swapchain_extent.height == 0) {
         return;
     }
-    ImGui::ShowDemoWindow();
     UniformBufferObject ubo{};
-    glm::mat4 model = glm::mat4(1.0f);
-    // вращение вокруг Y
+    glm::mat4 model = glm::rotate(glm::mat4(1.0f), static_cast<float>(time), glm::vec3(0.0f, 1.0f, 0.0f));
     glm::mat4 view = glm::lookAt(
         glm::vec3(0.0f, 0.0f, 5.0f),
         glm::vec3(0.0f, 0.0f, 0.0f),
@@ -396,8 +391,8 @@ void update([[maybe_unused]] double time) {
     );
     float aspect = (float)graphics::internal::context.swapchain_extent.width /
                     (float)graphics::internal::context.swapchain_extent.height;
-    
-    glm::mat4 proj = glm::perspective(
+
+    glm::mat4 proj = glm::perspectiveRH_ZO(
         glm::radians(45.0f),
         aspect,
         0.1f,
@@ -409,25 +404,23 @@ void update([[maybe_unused]] double time) {
     ubo.userColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
 
     memcpy(uniformMapped, &ubo, sizeof(ubo));
+    vmaFlushAllocation(graphics::internal::context.allocator, uniformAllocation, 0, sizeof(ubo));
 }
 
 std::vector<Vertex> generateIcosahedron() {
-    // Канонические координаты вершин икосаэдра через золотое сечение
     const float t = (1.0f + sqrtf(5.0f)) / 2.0f;
-    
+
     glm::vec3 rawPositions[12] = {
         {-1,  t,  0}, { 1,  t,  0}, {-1, -t,  0}, { 1, -t,  0},
         { 0, -1,  t}, { 0,  1,  t}, { 0, -1, -t}, { 0,  1, -t},
         { t,  0, -1}, { t,  0,  1}, {-t,  0, -1}, {-t,  0,  1}
     };
 
-    // Нормализуем к единичной сфере
     glm::vec3 positions[12];
     for (int i = 0; i < 12; ++i) {
         positions[i] = glm::normalize(rawPositions[i]);
     }
 
-    // Проверенные индексы для CCW winding order
     int faces[20][3] = {
         {0, 11, 5}, {0, 5, 1}, {0, 1, 7}, {0, 7, 10}, {0, 10, 11},
         {1, 5, 9}, {5, 11, 4}, {11, 10, 2}, {10, 7, 6}, {7, 1, 8},
@@ -439,10 +432,11 @@ std::vector<Vertex> generateIcosahedron() {
     vertices.reserve(60);
 
     for (int f = 0; f < 20; ++f) {
-        // Уникальный цвет для каждой грани
-        float r = ((f * 7) % 10) / 10.0f + 0.2f;
-        float g = ((f * 13) % 10) / 10.0f + 0.2f;
-        float b = ((f * 17) % 10) / 10.0f + 0.2f;
+        // один цвет на все 3 вершины грани — заливка сплошная, без градиента
+        float h = (f / 20.0f) * 6.0f;
+        float r = glm::clamp(glm::abs(h - 3.0f) - 1.0f, 0.0f, 1.0f);
+        float g = glm::clamp(2.0f - glm::abs(h - 2.0f), 0.0f, 1.0f);
+        float b = glm::clamp(2.0f - glm::abs(h - 4.0f), 0.0f, 1.0f);
         glm::vec3 color(r, g, b);
 
         for (int v = 0; v < 3; ++v) {
@@ -458,14 +452,12 @@ void render(const graphics::internal::FrameData& fd) {
         graphics::internal::context.swapchain_extent.height == 0) {
         return;
     }
-    // Начинаем запись командного буфера
     const VkCommandBufferBeginInfo begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
     vkBeginCommandBuffer(fd.command_buffer, &begin_info);
 
-    // Начинаем render pass
     auto& context = graphics::internal::context;
 
     VkClearValue clear_values[2];
@@ -482,9 +474,6 @@ void render(const graphics::internal::FrameData& fd) {
     };
 
     vkCmdBeginRenderPass(fd.command_buffer, &render_pass_begin, VK_SUBPASS_CONTENTS_INLINE);
-
-    // Здесь потом можно рисовать (vkCmdBindPipeline, vkCmdDraw и т.д.)
-    // Пока оставляем пустым — этого достаточно, чтобы буфер был валидным.
 
     vkCmdBindPipeline(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
@@ -503,17 +492,12 @@ void render(const graphics::internal::FrameData& fd) {
     VkDeviceSize offset = 0;
 
     vkCmdSetViewport(fd.command_buffer, 0, 1, &viewport);
-
     vkCmdSetScissor(fd.command_buffer, 0, 1, &scissor);
-
     vkCmdBindVertexBuffers(fd.command_buffer, 0, 1, &vertexBuffer, &offset);
-
     vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
     vkCmdDraw(fd.command_buffer, 60, 1, 0, 0);
-  // только первый треугольник
 
     vkCmdEndRenderPass(fd.command_buffer);
-
     vkEndCommandBuffer(fd.command_buffer);
 }
 
