@@ -24,80 +24,90 @@ GLFWwindow* glfw_window;
 } // namespace
 
 int main() {
-	int status = EXIT_SUCCESS;
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+    std::cerr << "[main] entered" << std::endl;
 
-	if (!glfwInit()) {
-		std::cerr << "Failed to initialize GLFW\n";
-		return EXIT_FAILURE;
-	}
+    int status = EXIT_SUCCESS;
 
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW\n";
+        return EXIT_FAILURE;
+    }
+    std::cerr << "[main] glfwInit ok" << std::endl;
 
-	glfw_window = glfwCreateWindow(default_window_width, default_window_height,
-	                               default_window_title, nullptr, nullptr);
-	if (glfw_window == nullptr) {
-		status = EXIT_FAILURE;
-		goto err_null_window;
-	}
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-	glfwSetFramebufferSizeCallback(glfw_window, [](GLFWwindow*, int width, int height){
-		if (width == 0 || height == 0) {
-			return;
-		}
+    glfw_window = glfwCreateWindow(default_window_width, default_window_height,
+                                   default_window_title, nullptr, nullptr);
+    if (glfw_window == nullptr) {
+        status = EXIT_FAILURE;
+        goto err_null_window;
+    }
+    std::cerr << "[main] window created" << std::endl;
 
-		graphics::internal::resize(width, height);
-	});
+    glfwSetFramebufferSizeCallback(glfw_window, [](GLFWwindow*, int width, int height){
+        if (width == 0 || height == 0) return;
+        graphics::internal::resize(width, height);
+    });
 
-	if (ImGui::CreateContext() == nullptr) {
-		std::cerr << "Failed to create ImGUI context\n";
-		status = EXIT_FAILURE;
-		goto err_imgui_init;
-	}
+    if (ImGui::CreateContext() == nullptr) {
+        std::cerr << "Failed to create ImGUI context\n";
+        status = EXIT_FAILURE;
+        goto err_imgui_init;
+    }
+    std::cerr << "[main] ImGui context created" << std::endl;
 
-	if (!ImGui_ImplGlfw_InitForVulkan(glfw_window, true)) {
-		std::cerr << "Failed to initialize ImGUI GLFW backend for Vulkan renderer\n";
-		status = EXIT_FAILURE;
-		goto err_imgui_glfw_init;
-	}
+    if (!ImGui_ImplGlfw_InitForVulkan(glfw_window, true)) {
+        std::cerr << "Failed to initialize ImGUI GLFW backend\n";
+        status = EXIT_FAILURE;
+        goto err_imgui_glfw_init;
+    }
+    std::cerr << "[main] ImGui GLFW backend init" << std::endl;
 
-	if (!graphics::internal::initialize(glfw_window)) {
-		std::cerr << "Failed to initialize graphics\n";
-		status = EXIT_FAILURE;
-		goto err_graphics_init;
-	}
+    if (!graphics::internal::initialize(glfw_window)) {
+        std::cerr << "Failed to initialize graphics\n";
+        status = EXIT_FAILURE;
+        goto err_graphics_init;
+    }
+    std::cerr << "[main] graphics init done" << std::endl;
 
-	if (!application::initialize()) {
-		std::cerr << "Failed to initialize application\n";
-		status = EXIT_FAILURE;
-		goto err_application_init;
-	}
+    if (!application::initialize()) {
+        std::cerr << "Failed to initialize application\n";
+        status = EXIT_FAILURE;
+        goto err_application_init;
+    }
+    std::cerr << "[main] application init done" << std::endl;
 
-	while (!glfwWindowShouldClose(glfw_window)) {
-		const double time = glfwGetTime();
+    while (!glfwWindowShouldClose(glfw_window)) {
+        const double time = glfwGetTime();
 
-		glfwPollEvents();
-		ImGui_ImplGlfw_NewFrame();
+        glfwPollEvents();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        application::update(time);
+        ImGui::Render();
 
-		ImGui::NewFrame();
-		application::update(time);
-		ImGui::Render();
+        graphics::internal::FrameData fd = graphics::internal::prepare();
 
-		graphics::internal::FrameData fd = graphics::internal::prepare();
-		application::render(fd);
-		graphics::internal::submitAndPresent();
-	}
+        application::render(fd);
 
-	application::shutdown();
+        graphics::internal::submitAndPresent();
+    }
+
+    std::cerr << "[main] exiting loop" << std::endl;
+
+    application::shutdown();
 err_application_init:
-	graphics::internal::shutdown();
+    graphics::internal::shutdown();
 err_graphics_init:
-	ImGui_ImplGlfw_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
 err_imgui_glfw_init:
-	ImGui::DestroyContext();
+    ImGui::DestroyContext();
 err_imgui_init:
-	glfwDestroyWindow(glfw_window);
+    glfwDestroyWindow(glfw_window);
 err_null_window:
-	glfwTerminate();
+    glfwTerminate();
+    std::cerr << "[main] terminated" << std::endl;
 
-	return 0;
+    return 0;
 }

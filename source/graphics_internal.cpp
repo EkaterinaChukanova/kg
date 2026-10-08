@@ -25,180 +25,195 @@ namespace graphics::internal {
 
 namespace {
 
-VkInstance vk_instance;
-uint32_t vk_api_version;
-VkSurfaceKHR vk_surface;
+// УБРАНЫ глобальные RAII-объекты VkBootstrap.
+// Если они и были причиной abort() до main(), теперь этого не будет.
 
-VkSwapchainKHR vk_swapchain;
+VkInstance vk_instance = VK_NULL_HANDLE;
+uint32_t vk_api_version = 0;
+VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+
+VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
 std::vector<VkImage> vk_swapchain_images;
 std::vector<VkImageView> vk_swapchain_image_views;
-uint32_t vk_swapchain_current_image;
+uint32_t vk_swapchain_current_image = UINT32_MAX;
 
-uint32_t vk_swapchain_resize_width;
-uint32_t vk_swapchain_resize_height;
-bool vk_swapchain_resize_require;
+uint32_t vk_swapchain_resize_width = 0;
+uint32_t vk_swapchain_resize_height = 0;
+bool vk_swapchain_resize_require = false;
 
-VkImage vk_image_depth_buffer;
-VmaAllocation vma_allocation_depth_buffer;
-VkImageView vk_image_view_depth_buffer;
+VkFormat vk_depth_buffer_format = VK_FORMAT_UNDEFINED;
+VkImage vk_image_depth_buffer = VK_NULL_HANDLE;
+VmaAllocation vma_allocation_depth_buffer = VK_NULL_HANDLE;
+VkImageView vk_image_view_depth_buffer = VK_NULL_HANDLE;
 
 std::vector<VkFramebuffer> vk_framebuffers;
 
-VkSemaphore vk_semaphore_image_available;
+VkSemaphore vk_semaphore_image_available = VK_NULL_HANDLE;
 std::vector<VkSemaphore> vk_semaphores_image_finished;
-VkFence vk_fence_frame_in_flight;
+VkFence vk_fence_frame_in_flight = VK_NULL_HANDLE;
 
-VkCommandPool vk_command_pool;
-VkCommandBuffer vk_command_buffer;
+VkCommandPool vk_command_pool = VK_NULL_HANDLE;
+VkCommandBuffer vk_command_buffer = VK_NULL_HANDLE;
 
-VkDescriptorPool vk_imgui_descriptor_pool;
-VkRenderPass vk_imgui_render_pass;
+VkDescriptorPool vk_imgui_descriptor_pool = VK_NULL_HANDLE;
+VkRenderPass vk_imgui_render_pass = VK_NULL_HANDLE;
 std::vector<VkFramebuffer> vk_imgui_framebuffers;
-VkCommandPool vk_imgui_command_pool;
-VkCommandBuffer vk_imgui_command_buffer;
+VkCommandPool vk_imgui_command_pool = VK_NULL_HANDLE;
+VkCommandBuffer vk_imgui_command_buffer = VK_NULL_HANDLE;
 
-bool initializeImGUI(GLFWwindow* const window) {
-	const VkDescriptorPoolSize descriptor_pool_sizes[] = {
-		{
-			.type = VK_DESCRIPTOR_TYPE_SAMPLER,
-			.descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE,
-		},
-		{
-			.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-			.descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE,
-		},
+VkFormat selectDepthFormat(VkPhysicalDevice physical_device) {
+	const VkFormat candidates[] = {
+		VK_FORMAT_D24_UNORM_S8_UINT,
+		VK_FORMAT_D32_SFLOAT_S8_UINT,
 	};
 
-	const VkDescriptorPoolCreateInfo descriptor_pool = {
-		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-		.maxSets = uint32_t(vk_swapchain_images.size()),
-		.poolSizeCount = sizeof(descriptor_pool_sizes) / sizeof(descriptor_pool_sizes[0]),
-		.pPoolSizes = descriptor_pool_sizes,
-	};
-
-	if (vkCreateDescriptorPool(context.device, &descriptor_pool, nullptr,
-							   &vk_imgui_descriptor_pool) != VK_SUCCESS) {
-		std::cerr << "Failed to create Vulkan descriptor pool for ImGUI rendering\n";
-		return false;
-	}
-
-	const VkAttachmentDescription render_pass_attachment = {
-		.format = context.swapchain_format,
-		.samples = VK_SAMPLE_COUNT_1_BIT,
-		.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-		.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-		.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-	};
-
-	const VkAttachmentReference render_pass_attachment_ref = {
-		.attachment = 0,
-		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-	};
-
-	const VkSubpassDescription render_pass_subpass = {
-		.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-		.colorAttachmentCount = 1,
-		.pColorAttachments = &render_pass_attachment_ref,
-	};
-
-	const VkSubpassDependency render_pass_dependency = {
-		.srcSubpass = VK_SUBPASS_EXTERNAL,
-		.dstSubpass = 0,
-		.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-		.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-						 VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-		.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-	};
-
-	const VkRenderPassCreateInfo render_pass = {
-		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-		.attachmentCount = 1,
-		.pAttachments = &render_pass_attachment,
-		.subpassCount = 1,
-		.pSubpasses = &render_pass_subpass,
-		.dependencyCount = 1,
-		.pDependencies = &render_pass_dependency,
-	};
-
-	if (vkCreateRenderPass(context.device, &render_pass, nullptr,
-						   &vk_imgui_render_pass) != VK_SUCCESS) {
-		std::cerr << "Failed to create Vulkan render pass for ImGUI rendering\n";
-		return false;
-	}
-
-	int width = 0, height = 0;
-	glfwGetWindowSize(window, &width, &height);
-
-	const uint32_t swapchain_images_count = uint32_t(vk_swapchain_images.size());
-
-	vk_imgui_framebuffers.resize(swapchain_images_count);
-
-	VkFramebufferCreateInfo framebuffer = {
-		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-		.renderPass = vk_imgui_render_pass,
-		.attachmentCount = 1,
-		.width = uint32_t(width),
-		.height = uint32_t(height),
-		.layers = 1,
-	};
-
-	for (uint32_t i = 0; i < swapchain_images_count; ++i) {
-		framebuffer.pAttachments = &vk_swapchain_image_views[i];
-
-		if (vkCreateFramebuffer(context.device, &framebuffer, nullptr,
-								&vk_imgui_framebuffers[i]) != VK_SUCCESS) {
-			std::cerr << "Failed to create Vulkan framebuffer #" << i << " for ImGUI rendering\n";
-			return false;
+	for (VkFormat format : candidates) {
+		VkFormatProperties properties{};
+		vkGetPhysicalDeviceFormatProperties(physical_device, format, &properties);
+		if (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+			return format;
 		}
 	}
 
-	const VkCommandPoolCreateInfo command_pool = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-		.queueFamilyIndex = context.graphics_queue_index,
-	};
+	return VK_FORMAT_UNDEFINED;
+}
 
-	if (vkCreateCommandPool(context.device, &command_pool, nullptr,
-							&vk_imgui_command_pool) != VK_SUCCESS) {
-		std::cerr << "Failed to create Vulkan command pool for ImGUI rendering\n";
-		return false;
-	}
+bool initializeImGUI() {
+    const VkDescriptorPoolSize descriptor_pool_sizes[] = {
+        { .type = VK_DESCRIPTOR_TYPE_SAMPLER,                 .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE },
+        { .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,           .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE },
+        { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,  .descriptorCount = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE },
+    };
 
-	const VkCommandBufferAllocateInfo command_buffer = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		.commandPool = vk_imgui_command_pool,
-		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = 1,
-	};
+    const VkDescriptorPoolCreateInfo descriptor_pool = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets = 1000,
+        .poolSizeCount = sizeof(descriptor_pool_sizes) / sizeof(descriptor_pool_sizes[0]),
+        .pPoolSizes = descriptor_pool_sizes,
+    };
 
-	if (vkAllocateCommandBuffers(context.device, &command_buffer,
-								 &vk_imgui_command_buffer) != VK_SUCCESS) {
-		std::cerr << "Failed to create Vulkan command buffer for ImGUI rendering\n";
-		return false;
-	}
+    if (vkCreateDescriptorPool(context.device, &descriptor_pool, nullptr, &vk_imgui_descriptor_pool) != VK_SUCCESS) {
+        std::cerr << "Failed to create Vulkan descriptor pool for ImGUI rendering\n";
+        return false;
+    }
 
-	ImGui_ImplVulkan_InitInfo init = {
-		.ApiVersion = vk_api_version,
-		.Instance = vk_instance,
-		.PhysicalDevice = context.physical_device,
-		.Device = context.device,
-		.QueueFamily = context.graphics_queue_index,
-		.Queue = context.graphics_queue,
-		.DescriptorPool = vk_imgui_descriptor_pool,
-		.MinImageCount = swapchain_images_count,
-		.ImageCount = swapchain_images_count,
-		.PipelineInfoMain = {
-			.RenderPass = vk_imgui_render_pass,
-		},
-	};
+    // --- Render pass для ImGui ---
+    const VkAttachmentDescription render_pass_attachment = {
+        .format = context.swapchain_format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
 
-	return ImGui_ImplVulkan_Init(&init);
+    const VkAttachmentReference render_pass_attachment_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    const VkSubpassDescription render_pass_subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &render_pass_attachment_ref,
+    };
+
+    const VkSubpassDependency render_pass_dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+    };
+
+    const VkRenderPassCreateInfo render_pass = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &render_pass_attachment,
+        .subpassCount = 1,
+        .pSubpasses = &render_pass_subpass,
+        .dependencyCount = 1,
+        .pDependencies = &render_pass_dependency,
+    };
+
+    if (vkCreateRenderPass(context.device, &render_pass, nullptr, &vk_imgui_render_pass) != VK_SUCCESS) {
+        std::cerr << "Failed to create Vulkan render pass for ImGUI rendering\n";
+        return false;
+    }
+
+    // --- Framebuffers для ImGui ---
+    const uint32_t swapchain_images_count = uint32_t(vk_swapchain_images.size());
+    vk_imgui_framebuffers.resize(swapchain_images_count);
+
+    VkFramebufferCreateInfo framebuffer = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = vk_imgui_render_pass,
+        .attachmentCount = 1,
+        .width = context.swapchain_extent.width,
+        .height = context.swapchain_extent.height,
+        .layers = 1,
+    };
+
+    for (uint32_t i = 0; i < swapchain_images_count; ++i) {
+        framebuffer.pAttachments = &vk_swapchain_image_views[i];
+        if (vkCreateFramebuffer(context.device, &framebuffer, nullptr, &vk_imgui_framebuffers[i]) != VK_SUCCESS) {
+            std::cerr << "Failed to create Vulkan framebuffer #" << i << " for ImGUI rendering\n";
+            return false;
+        }
+    }
+
+    // --- Command pool и command buffer для ImGui ---
+    const VkCommandPoolCreateInfo command_pool = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = context.graphics_queue_index,
+    };
+
+    if (vkCreateCommandPool(context.device, &command_pool, nullptr, &vk_imgui_command_pool) != VK_SUCCESS) {
+        std::cerr << "Failed to create Vulkan command pool for ImGUI rendering\n";
+        return false;
+    }
+
+    const VkCommandBufferAllocateInfo command_buffer = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = vk_imgui_command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+
+    if (vkAllocateCommandBuffers(context.device, &command_buffer, &vk_imgui_command_buffer) != VK_SUCCESS) {
+        std::cerr << "Failed to create Vulkan command buffer for ImGUI rendering\n";
+        return false;
+    }
+
+    // --- Инициализация ImGui Vulkan backend ---
+    ImGui_ImplVulkan_InitInfo init = {
+        .ApiVersion = vk_api_version,
+        .Instance = vk_instance,
+        .PhysicalDevice = context.physical_device,
+        .Device = context.device,
+        .QueueFamily = context.graphics_queue_index,
+        .Queue = context.graphics_queue,
+        .DescriptorPool = vk_imgui_descriptor_pool,
+        .MinImageCount = swapchain_images_count,
+        .ImageCount = swapchain_images_count,
+        .PipelineInfoMain = {
+            .RenderPass = vk_imgui_render_pass,
+            .MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+        },
+    };
+
+    if (!ImGui_ImplVulkan_Init(&init)) {
+        std::cerr << "ImGui_ImplVulkan_Init failed\n";
+        return false;
+    }
+
+    return true;
 }
 
 void drawImGUI() {
@@ -228,7 +243,7 @@ void drawImGUI() {
 }
 
 bool rebuildSwapchain(uint32_t width, uint32_t height) {
-	vkQueueWaitIdle(context.graphics_queue);
+	vkDeviceWaitIdle(context.device);
 
 	vkb::SwapchainBuilder sb(context.physical_device, context.device, vk_surface,
 	                         context.graphics_queue_index, context.graphics_queue_index);
@@ -239,8 +254,10 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 					   .use_default_image_usage_flags()
 					   .set_old_swapchain(vk_swapchain)
 					   .build();
+
 	if (!sb_result) {
 		std::cerr << sb_result.error().message() << '\n';
+		return false;
 	}
 
 	auto vkb_swapchain = sb_result.value();
@@ -257,6 +274,9 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 	context.swapchain_format = vkb_swapchain.image_format;
 	context.swapchain_extent = vkb_swapchain.extent;
 
+	vk_swapchain_resize_width  = context.swapchain_extent.width;
+	vk_swapchain_resize_height = context.swapchain_extent.height;
+
 	auto swapchain_images = vkb_swapchain.get_images().value();
 	auto swapchain_image_views = vkb_swapchain.get_image_views().value();
 
@@ -269,8 +289,8 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 	const VkImageCreateInfo depth_buffer = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.imageType = VK_IMAGE_TYPE_2D,
-		.format = VK_FORMAT_D24_UNORM_S8_UINT,
-		.extent = { uint32_t(width), uint32_t(height), 1 },
+		.format = vk_depth_buffer_format,
+		.extent = { context.swapchain_extent.width, context.swapchain_extent.height, 1 },
 		.mipLevels = 1,
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -295,7 +315,7 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 		.image = vk_image_depth_buffer,
 		.viewType = VK_IMAGE_VIEW_TYPE_2D,
-		.format = VK_FORMAT_D24_UNORM_S8_UINT,
+		.format = vk_depth_buffer_format,
 		.subresourceRange = {
 			.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
 			.baseMipLevel = 0,
@@ -323,8 +343,8 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 		.renderPass = context.render_pass,
 		.attachmentCount = sizeof(framebuffer_attachments) / sizeof(framebuffer_attachments[0]),
 		.pAttachments = framebuffer_attachments,
-		.width = uint32_t(width),
-		.height = uint32_t(height),
+		.width = context.swapchain_extent.width,
+		.height = context.swapchain_extent.height,
 		.layers = 1,
 	};
 
@@ -346,8 +366,8 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
 		.renderPass = vk_imgui_render_pass,
 		.attachmentCount = 1,
-		.width = uint32_t(width),
-		.height = uint32_t(height),
+		.width = context.swapchain_extent.width,
+		.height = context.swapchain_extent.height,
 		.layers = 1,
 	};
 
@@ -371,15 +391,20 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 Context context;
 
 bool initialize(GLFWwindow* const window) {
-	int width = 0, height = 0;
-	glfwGetWindowSize(window, &width, &height);
-
 	vkb::InstanceBuilder ib;
 
 	auto ibr = ib.require_api_version(VK_MAKE_VERSION(1, 1, 0))
 				 .request_validation_layers()
 				 .build();
 
+	if (!ibr) {
+		std::cerr << "Instance build error: " << ibr.error().message() << '\n';
+		return false;
+	}
+
+	// Локальный RAII-объект, который живёт до конца initialize().
+	// handle'ы копируем в глобальные переменные, но сами объекты
+	// НЕ храним глобально — иначе abort() до main().
 	auto vkb_instance = ibr.value();
 	vk_instance = vkb_instance.instance;
 	vk_api_version = vkb_instance.api_version;
@@ -402,6 +427,12 @@ bool initialize(GLFWwindow* const window) {
 	}
 
 	auto vkb_physical_device = pds_result.value();
+
+	vk_depth_buffer_format = selectDepthFormat(vkb_physical_device.physical_device);
+	if (vk_depth_buffer_format == VK_FORMAT_UNDEFINED) {
+		std::cerr << "No supported depth/stencil attachment format found\n";
+		return false;
+	}
 
 	vkb::DeviceBuilder db(vkb_physical_device);
 
@@ -462,13 +493,17 @@ bool initialize(GLFWwindow* const window) {
 	vk_swapchain_image_views = vkb_swapchain.get_image_views().value();
 	vk_swapchain_current_image = UINT32_MAX;
 
+	vk_swapchain_resize_width  = context.swapchain_extent.width;
+	vk_swapchain_resize_height = context.swapchain_extent.height;
+	vk_swapchain_resize_require = false;
+
 	const uint32_t swapchain_images_count = uint32_t(vk_swapchain_images.size());
 
 	const VkImageCreateInfo depth_buffer = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.imageType = VK_IMAGE_TYPE_2D,
-		.format = VK_FORMAT_D24_UNORM_S8_UINT,
-		.extent = { uint32_t(width), uint32_t(height), 1 },
+		.format = vk_depth_buffer_format,
+		.extent = { context.swapchain_extent.width, context.swapchain_extent.height, 1 },
 		.mipLevels = 1,
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -493,7 +528,7 @@ bool initialize(GLFWwindow* const window) {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 		.image = vk_image_depth_buffer,
 		.viewType = VK_IMAGE_VIEW_TYPE_2D,
-		.format = VK_FORMAT_D24_UNORM_S8_UINT,
+		.format = vk_depth_buffer_format,
 		.subresourceRange = {
 			.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
 			.baseMipLevel = 0,
@@ -521,7 +556,7 @@ bool initialize(GLFWwindow* const window) {
 			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 		},
 		{
-			.format = VK_FORMAT_D24_UNORM_S8_UINT,
+			.format = vk_depth_buffer_format,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -572,8 +607,8 @@ bool initialize(GLFWwindow* const window) {
 		.renderPass = context.render_pass,
 		.attachmentCount = sizeof(framebuffer_attachments) / sizeof(framebuffer_attachments[0]),
 		.pAttachments = framebuffer_attachments,
-		.width = uint32_t(width),
-		.height = uint32_t(height),
+		.width = context.swapchain_extent.width,
+		.height = context.swapchain_extent.height,
 		.layers = 1,
 	};
 
@@ -606,14 +641,14 @@ bool initialize(GLFWwindow* const window) {
 		}
 	}
 
-	if (vkCreateSemaphore(context.device, &semaphore, NULL,
+	if (vkCreateSemaphore(context.device, &semaphore, nullptr,
 						  &vk_semaphore_image_available) != VK_SUCCESS) {
 		std::cerr << "Failed to create Vulkan semaphore for available image\n";
 		return false;
 	}
 
 	if (vkCreateFence(context.device, &fence, nullptr, &vk_fence_frame_in_flight) != VK_SUCCESS) {
-		std::cerr << "Failed to create Vulkan semaphore for image in flight\n";
+		std::cerr << "Failed to create Vulkan fence for frame in flight\n";
 		return false;
 	}
 
@@ -640,7 +675,7 @@ bool initialize(GLFWwindow* const window) {
 		return false;
 	}
 
-	if (!initializeImGUI(window)) {
+	if (!initializeImGUI()) {
 		std::cerr << "Failed to initialize ImGUI Vulkan rendering backend\n";
 		return false;
 	}
@@ -649,7 +684,9 @@ bool initialize(GLFWwindow* const window) {
 }
 
 void shutdown() {
-	vkQueueWaitIdle(context.graphics_queue);
+	if (context.device != VK_NULL_HANDLE) {
+		vkDeviceWaitIdle(context.device);
+	}
 
 	ImGui_ImplVulkan_Shutdown();
 
@@ -719,7 +756,7 @@ retry_acquire:
 		break;
 
 	default:
-		std::cerr << "Failed to present Vulkan swapchain image\n";
+		std::cerr << "Failed to acquire Vulkan swapchain image\n";
 		return {};
 	}
 
@@ -751,24 +788,28 @@ void submitAndPresent() {
 		.pSignalSemaphores = &vk_semaphores_image_finished[vk_swapchain_current_image],
 	};
 
-	vkQueueSubmit(context.graphics_queue, 1, &submit, vk_fence_frame_in_flight);
+	if (vkQueueSubmit(context.graphics_queue, 1, &submit, vk_fence_frame_in_flight) != VK_SUCCESS) {
+		std::cerr << "vkQueueSubmit failed\n";
+		return;
+	}
 
 	const VkPresentInfoKHR present = {
-		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &vk_semaphores_image_finished[vk_swapchain_current_image],
-		.swapchainCount = 1,
-		.pSwapchains = &vk_swapchain,
-		.pImageIndices = &vk_swapchain_current_image,
+			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+			.waitSemaphoreCount = 1,
+			.pWaitSemaphores = &vk_semaphores_image_finished[vk_swapchain_current_image],
+			.swapchainCount = 1,
+			.pSwapchains = &vk_swapchain,
+			.pImageIndices = &vk_swapchain_current_image,
 	};
 
 	VkResult result = vkQueuePresentKHR(context.graphics_queue, &present);
+
 	if (result == VK_ERROR_OUT_OF_DATE_KHR ||
 	    result == VK_SUBOPTIMAL_KHR ||
 	    vk_swapchain_resize_require) {
 		rebuildSwapchain(vk_swapchain_resize_width, vk_swapchain_resize_height);
-	} else {
-		std::cerr << "Failed to present Vulkan swapchain image\n";
+	} else if (result != VK_SUCCESS) {
+		std::cerr << "Failed to present Vulkan swapchain image: " << result << '\n';
 	}
 }
 
