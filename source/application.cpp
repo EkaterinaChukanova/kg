@@ -432,7 +432,6 @@ std::vector<Vertex> generateIcosahedron() {
     vertices.reserve(60);
 
     for (int f = 0; f < 20; ++f) {
-        // один цвет на все 3 вершины грани — заливка сплошная, без градиента
         float h = (f / 20.0f) * 6.0f;
         float r = glm::clamp(glm::abs(h - 3.0f) - 1.0f, 0.0f, 1.0f);
         float g = glm::clamp(2.0f - glm::abs(h - 2.0f), 0.0f, 1.0f);
