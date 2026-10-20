@@ -2,23 +2,41 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
 #include <glm/glm.hpp>
+#include <GLFW/glfw3.h>
 #include <cstring>
 #include <vector>
 #include <iostream>
 #include <fstream>
 #include <string>
 
+extern GLFWwindow* glfw_window;
+
 namespace application {
 
 struct Vertex{
     glm::vec3 position;
     glm::vec3 color;
+    glm::vec3 normal;
 };
 
 struct UniformBufferObject{
     glm::mat4 mvp;
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
     glm::vec4 userColor;
+
+    glm::vec3 lightDir = glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f));
+    glm::vec3 lightColor = glm::vec3(1.0f);
+    float shininess = 32.0f;
 };
+
+glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 5.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+float yaw = -90.0f;
+float pitch = 0.0f;
 
 std::vector<Vertex> generateIcosahedron();
 
@@ -100,7 +118,7 @@ bool initialize() {
     bindingDescription.stride = sizeof(Vertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attributeDescriptions[2]{};
+    VkVertexInputAttributeDescription attributeDescriptions[3]{};
 
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].binding = 0;
@@ -110,13 +128,18 @@ bool initialize() {
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
+    attributeDescriptions[1].offset = offsetof(Vertex, normal);
+
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].binding = 0;
+    attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[2].offset = offsetof(Vertex, color);
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 1;
     vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = 2;
+    vertexInputInfo.vertexAttributeDescriptionCount = 3;
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo{};
@@ -384,11 +407,12 @@ void update([[maybe_unused]] double time) {
     }
     UniformBufferObject ubo{};
     glm::mat4 model = glm::rotate(glm::mat4(1.0f), static_cast<float>(time), glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 view = glm::lookAt(
-        glm::vec3(0.0f, 0.0f, 5.0f),
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.0f, 0.0f)
-    );
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+    glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     float aspect = (float)graphics::internal::context.swapchain_extent.width /
                     (float)graphics::internal::context.swapchain_extent.height;
 
@@ -400,7 +424,21 @@ void update([[maybe_unused]] double time) {
     );
     proj[1][1] *= -1.0f;
 
+    float cameraSpeed = 0.05f;
+    if (glfwGetKey(glfw_window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += cameraSpeed * cameraFront;
+    if (glfwGetKey(glfw_window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= cameraSpeed * cameraFront;
+    if (glfwGetKey(glfw_window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(glfw_window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    ubo.model = model;
+    ubo.view = view;
     ubo.mvp = proj * view * model;
+    ubo.lightDir = glm::vec3(0.0f, 0.0f, -1.0f); // Свет идет вдоль оси Z на нас
+    ubo.lightDir = glm::normalize(ubo.lightDir);
+    ubo.lightColor = glm::vec3(1.0f); // Яркий белый свет
     ubo.userColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
 
     memcpy(uniformMapped, &ubo, sizeof(ubo));
@@ -439,7 +477,9 @@ std::vector<Vertex> generateIcosahedron() {
         glm::vec3 color(r, g, b);
 
         for (int v = 0; v < 3; ++v) {
-            vertices.push_back({positions[faces[f][v]], color});
+            glm::vec3 pos = positions[faces[f][v]];
+            glm::vec3 norm = pos; 
+            vertices.push_back({pos, norm, color});
         }
     }
 

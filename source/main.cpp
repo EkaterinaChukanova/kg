@@ -12,14 +12,14 @@
 #include "graphics_internal.hpp"
 #include "application.hpp"
 
+GLFWwindow* glfw_window = nullptr; 
+
 namespace {
 
 constexpr int32_t default_window_width = 1280;
 constexpr int32_t default_window_height = 720;
 
 constexpr char default_window_title[] = "Vulkan Starter App";
-
-GLFWwindow* glfw_window;
 
 } // namespace
 
