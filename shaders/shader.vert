@@ -11,12 +11,17 @@ layout(location = 2) out vec3 fragColor;
 layout(binding = 0) uniform UBO {
     mat4 mvp;
     mat4 model;
+    mat4 view;
+    mat4 proj;
     vec4 userColor;
+    vec4 lightDir;
+    vec4 lightColor;
+    vec4 cameraPos;
 } ubo;
 
 void main() {
     gl_Position = ubo.mvp * vec4(inPosition, 1.0);
-    fragPos = inPosition; 
-    fragNormal = inNormal;
+    fragPos = vec3(ubo.model * vec4(inPosition, 1.0));
+    fragNormal = mat3(ubo.model) * inNormal;
     fragColor = inColor;
 }

@@ -25,15 +25,18 @@ struct UniformBufferObject{
     glm::mat4 view;
     glm::mat4 proj;
     glm::vec4 userColor;
-
-    glm::vec3 lightDir = glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f));
-    glm::vec3 lightColor = glm::vec3(1.0f);
-    float shininess = 32.0f;
+    glm::vec4 lightDir;
+    glm::vec4 lightColor; // xyz — цвет, w — степень блика
+    glm::vec4 cameraPos;
 };
 
 glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 5.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+glm::vec4 g_userColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+glm::vec4 g_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 32.0f); // w используем под shininess
+glm::vec4 g_lightDir = glm::vec4(0.0f, -0.3f, -1.0f, 0.0f);
 
 float yaw = -90.0f;
 float pitch = 0.0f;
@@ -157,7 +160,7 @@ bool initialize() {
     rasterizer.depthClampEnable = VK_FALSE;
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.cullMode = VK_CULL_MODE_NONE; // Отключить отсечение
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.lineWidth = 1.0f;
@@ -232,8 +235,6 @@ bool initialize() {
         return false;
     }
 
-    std::cerr << "Descriptor pool created\n";
-
     VkDescriptorSetAllocateInfo setAllocateInfo{};
     setAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     setAllocateInfo.descriptorPool = descriptorPool;
@@ -244,8 +245,6 @@ bool initialize() {
         std::cerr << "Failed to allocate descriptor set\n";
         return false;
     }
-
-    std::cerr << "Descriptor set allocated\n";
 
     VkBufferCreateInfo uboBufferInfo{};
     uboBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -284,7 +283,6 @@ bool initialize() {
         std::cerr << "uniformMapped is null!\n";
         return false;
     }
-    std::cerr << "Uniform buffer created\n";
 
     VkDescriptorBufferInfo bufferDescriptorInfo{};
     bufferDescriptorInfo.buffer = uniformBuffer;
@@ -300,7 +298,6 @@ bool initialize() {
     descriptorWrite.pBufferInfo = &bufferDescriptorInfo;
 
     vkUpdateDescriptorSets(context.device, 1, &descriptorWrite, 0, nullptr);
-    std::cerr << "Descriptor set updated\n";
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -311,8 +308,6 @@ bool initialize() {
         std::cerr << "Failed to create pipeline layout\n";
         return false;
     }
-
-    std::cerr << "Pipeline layout created\n";
 
     VkPipelineShaderStageCreateInfo stages[] = { vertStage, fragStage };
 
@@ -339,8 +334,6 @@ bool initialize() {
         return false;
     }
 
-    std::cerr << "Graphics pipeline created\n";
-
     void* data = nullptr;
     vmaMapMemory(context.allocator, vertexAllocation, &data);
 
@@ -349,8 +342,6 @@ bool initialize() {
     vmaFlushAllocation(context.allocator, vertexAllocation, 0, dataSize);
     vmaUnmapMemory(context.allocator, vertexAllocation);
 
-    std::cerr << "Copied " << vertices.size() << " vertices ("
-            << dataSize << " bytes) to GPU buffer" << std::endl;
     return true;
 }
 
@@ -405,7 +396,7 @@ void update([[maybe_unused]] double time) {
         graphics::internal::context.swapchain_extent.height == 0) {
         return;
     }
-    UniformBufferObject ubo{};
+
     glm::mat4 model = glm::rotate(glm::mat4(1.0f), static_cast<float>(time), glm::vec3(0.0f, 1.0f, 0.0f));
     glm::vec3 front;
     front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
@@ -433,13 +424,28 @@ void update([[maybe_unused]] double time) {
         cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
     if (glfwGetKey(glfw_window, GLFW_KEY_D) == GLFW_PRESS)
         cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+
+    ImGui::SetNextWindowSize(ImVec2(340, 180), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Lab 2");
+    ImGui::ColorEdit3("Цвет света", &g_lightColor.x);
+    ImGui::SliderFloat3("Направление", &g_lightDir.x, -1.0f, 1.0f);
+    ImGui::ColorEdit3("Оттенок фигуры", &g_userColor.x);
+    ImGui::SliderFloat("Блик", &g_lightColor.w, 1.0f, 128.0f);
+    ImGui::End();
+
+    glm::vec3 dir(g_lightDir);
+    if (glm::dot(dir, dir) < 1e-6f)
+        dir = glm::vec3(0.0f, 0.0f, -1.0f);
+
+    UniformBufferObject ubo{};
     ubo.model = model;
     ubo.view = view;
+    ubo.proj = proj;
     ubo.mvp = proj * view * model;
-    ubo.lightDir = glm::vec3(0.0f, 0.0f, -1.0f); // Свет идет вдоль оси Z на нас
-    ubo.lightDir = glm::normalize(ubo.lightDir);
-    ubo.lightColor = glm::vec3(1.0f); // Яркий белый свет
-    ubo.userColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    ubo.lightDir = glm::vec4(glm::normalize(dir), 0.0f);
+    ubo.lightColor = g_lightColor;
+    ubo.userColor = g_userColor;
+    ubo.cameraPos = glm::vec4(cameraPos, 1.0f);
 
     memcpy(uniformMapped, &ubo, sizeof(ubo));
     vmaFlushAllocation(graphics::internal::context.allocator, uniformAllocation, 0, sizeof(ubo));
@@ -476,10 +482,14 @@ std::vector<Vertex> generateIcosahedron() {
         float b = glm::clamp(2.0f - glm::abs(h - 4.0f), 0.0f, 1.0f);
         glm::vec3 color(r, g, b);
 
+        glm::vec3 p0 = positions[faces[f][0]];
+        glm::vec3 p1 = positions[faces[f][1]];
+        glm::vec3 p2 = positions[faces[f][2]];
+        glm::vec3 norm = glm::normalize(glm::cross(p1 - p0, p2 - p0));
+        glm::vec3 tri[3] = {p0, p1, p2};
+
         for (int v = 0; v < 3; ++v) {
-            glm::vec3 pos = positions[faces[f][v]];
-            glm::vec3 norm = pos; 
-            vertices.push_back({pos, norm, color});
+            vertices.push_back({tri[v], color, norm});
         }
     }
 

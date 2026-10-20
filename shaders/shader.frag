@@ -9,18 +9,27 @@ layout(location = 0) out vec4 outColor;
 layout(binding = 0) uniform UBO {
     mat4 mvp;
     mat4 model;
+    mat4 view;
+    mat4 proj;
     vec4 userColor;
-    
-    // Параметры для освещения
-    vec3 lightDir;   // Направление света
-    vec3 lightColor; // Цвет света
-    float shininess; // Сила блика
+    vec4 lightDir;
+    vec4 lightColor;
+    vec4 cameraPos;
 } ubo;
 
-void main(){
+void main() {
     vec3 N = normalize(fragNormal);
-    vec3 L = normalize(-ubo.lightDir); // Важно: минус, если lightDir - направление луча
-    
-    float diff = max(dot(N, L), 0.0);
-    outColor = vec4(vec3(diff), 1.0); // Просто покажем интенсивность света (от черного к белому)
+    vec3 L = normalize(-ubo.lightDir.xyz);
+    vec3 V = normalize(ubo.cameraPos.xyz - fragPos);
+    vec3 H = normalize(L + V);
+
+    float diff = pow(max(dot(N, L), 0.0), 1.4);
+    float shininess = max(ubo.lightColor.w, 1.0);
+    float spec = pow(max(dot(N, H), 0.0), shininess);
+
+    vec3 albedo = fragColor * ubo.userColor.rgb;
+    vec3 color = albedo * 0.06
+            + diff * albedo * ubo.lightColor.rgb
+            + spec * ubo.lightColor.rgb;
+    outColor = vec4(color, 1.0);
 }
