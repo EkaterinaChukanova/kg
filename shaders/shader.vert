@@ -13,10 +13,12 @@ layout(binding = 0) uniform UBO {
     mat4 model;
     mat4 view;
     mat4 proj;
-    vec4 userColor;
+    vec4 albedo;
     vec4 lightDir;
     vec4 lightColor;
     vec4 cameraPos;
+    vec4 specColor;
+    vec4 ambient;
 } ubo;
 
 void main() {

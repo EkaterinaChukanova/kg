@@ -11,10 +11,12 @@ layout(binding = 0) uniform UBO {
     mat4 model;
     mat4 view;
     mat4 proj;
-    vec4 userColor;
+    vec4 albedo;
     vec4 lightDir;
-    vec4 lightColor;
+    vec4 lightColor; // xyz — цвет, w — интенсивность
     vec4 cameraPos;
+    vec4 specColor;  // xyz — цвет блика, w — коэффициент блика
+    vec4 ambient;
 } ubo;
 
 void main() {
@@ -23,13 +25,15 @@ void main() {
     vec3 V = normalize(ubo.cameraPos.xyz - fragPos);
     vec3 H = normalize(L + V);
 
-    float diff = pow(max(dot(N, L), 0.0), 1.4);
-    float shininess = max(ubo.lightColor.w, 1.0);
+    float diff = max(dot(N, L), 0.0);
+    float shininess = max(ubo.specColor.w, 1.0);
     float spec = pow(max(dot(N, H), 0.0), shininess);
+    spec *= step(0.0, dot(N, L));
+    vec3 light = ubo.lightColor.rgb * ubo.lightColor.w;
 
-    vec3 albedo = fragColor * ubo.userColor.rgb;
-    vec3 color = albedo * 0.06
-            + diff * albedo * ubo.lightColor.rgb
-            + spec * ubo.lightColor.rgb;
+    vec3 base = fragColor * ubo.albedo.rgb;
+    vec3 color = ubo.ambient.rgb * base
+               + diff * base * light
+               + spec * ubo.specColor.rgb * light;
     outColor = vec4(color, 1.0);
 }

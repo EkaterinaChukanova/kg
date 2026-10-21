@@ -12,7 +12,7 @@
 #include "graphics_internal.hpp"
 #include "application.hpp"
 
-GLFWwindow* glfw_window = nullptr; 
+GLFWwindow* glfw_window = nullptr;
 
 namespace {
 
@@ -56,6 +56,17 @@ int main() {
         goto err_imgui_init;
     }
     std::cerr << "[main] ImGui context created" << std::endl;
+
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        ImFont* font = io.Fonts->AddFontFromFileTTF(
+            "C:/Windows/Fonts/arial.ttf",
+            18.0f,
+            nullptr,
+            io.Fonts->GetGlyphRangesCyrillic());
+        if (font != nullptr)
+            io.FontDefault = font;
+    }
 
     if (!ImGui_ImplGlfw_InitForVulkan(glfw_window, true)) {
         std::cerr << "Failed to initialize ImGUI GLFW backend\n";
@@ -109,5 +120,5 @@ err_null_window:
     glfwTerminate();
     std::cerr << "[main] terminated" << std::endl;
 
-    return 0;
+    return status;
 }

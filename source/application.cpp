@@ -1,3 +1,4 @@
+#pragma execution_character_set("utf-8")
 #include "application.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
@@ -24,19 +25,25 @@ struct UniformBufferObject{
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
-    glm::vec4 userColor;
+    glm::vec4 albedo;
     glm::vec4 lightDir;
-    glm::vec4 lightColor; // xyz — цвет, w — степень блика
+    glm::vec4 lightColor; // xyz — цвет, w — интенсивность
     glm::vec4 cameraPos;
+    glm::vec4 specColor;  // xyz — цвет блика, w — коэффициент блика
+    glm::vec4 ambient;
 };
 
 glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 5.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 
-glm::vec4 g_userColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-glm::vec4 g_lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 32.0f); // w используем под shininess
+glm::vec4 g_albedo = glm::vec4(1.0f);
+glm::vec4 g_lightColor = glm::vec4(1.0f);
 glm::vec4 g_lightDir = glm::vec4(0.0f, -0.3f, -1.0f, 0.0f);
+glm::vec4 g_specColor = glm::vec4(1.0f, 1.0f, 1.0f, 32.0f);
+glm::vec4 g_ambient = glm::vec4(0.06f, 0.06f, 0.06f, 0.0f);
+float g_intensity = 1.0f;
+float g_fov = 45.0f;
 
 float yaw = -90.0f;
 float pitch = 0.0f;
@@ -100,8 +107,6 @@ bool initialize() {
         std::cerr << "Failed to create shader modules\n";
         return false;
     }
-
-    std::cerr << "Shader modules created\n";
 
     VkPipelineShaderStageCreateInfo vertStage{};
     VkPipelineShaderStageCreateInfo fragStage{};
@@ -398,22 +403,34 @@ void update([[maybe_unused]] double time) {
     }
 
     glm::mat4 model = glm::rotate(glm::mat4(1.0f), static_cast<float>(time), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    ImGui::SetNextWindowSize(ImVec2(380, 460), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Lab 2");
+
+    if (ImGui::CollapsingHeader("Камера", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::DragFloat3("Позиция", &cameraPos.x, 0.05f);
+        ImGui::SliderFloat("Поворот (yaw)", &yaw, -180.0f, 180.0f);
+        ImGui::SliderFloat("Наклон (pitch)", &pitch, -89.0f, 89.0f);
+        ImGui::SliderFloat("Угол обзора", &g_fov, 10.0f, 120.0f);
+    }
+    if (ImGui::CollapsingHeader("Направленный свет", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::ColorEdit3("Цвет света", &g_lightColor.x);
+        ImGui::SliderFloat("Интенсивность", &g_intensity, 0.0f, 5.0f);
+        ImGui::SliderFloat3("Направление", &g_lightDir.x, -1.0f, 1.0f);
+    }
+    if (ImGui::CollapsingHeader("Материал", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::ColorEdit3("Альбедо", &g_albedo.x);
+        ImGui::ColorEdit3("Цвет блика", &g_specColor.x);
+        ImGui::SliderFloat("Коэффициент блика", &g_specColor.w, 1.0f, 128.0f);
+        ImGui::ColorEdit3("Рассеянный свет", &g_ambient.x);
+    }
+    ImGui::End();
+
     glm::vec3 front;
     front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
     front.y = sin(glm::radians(pitch));
     front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
     cameraFront = glm::normalize(front);
-    glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-    float aspect = (float)graphics::internal::context.swapchain_extent.width /
-                    (float)graphics::internal::context.swapchain_extent.height;
-
-    glm::mat4 proj = glm::perspectiveRH_ZO(
-        glm::radians(45.0f),
-        aspect,
-        0.1f,
-        100.0f
-    );
-    proj[1][1] *= -1.0f;
 
     float cameraSpeed = 0.05f;
     if (glfwGetKey(glfw_window, GLFW_KEY_W) == GLFW_PRESS)
@@ -425,13 +442,11 @@ void update([[maybe_unused]] double time) {
     if (glfwGetKey(glfw_window, GLFW_KEY_D) == GLFW_PRESS)
         cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 
-    ImGui::SetNextWindowSize(ImVec2(340, 180), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Lab 2");
-    ImGui::ColorEdit3("Цвет света", &g_lightColor.x);
-    ImGui::SliderFloat3("Направление", &g_lightDir.x, -1.0f, 1.0f);
-    ImGui::ColorEdit3("Оттенок фигуры", &g_userColor.x);
-    ImGui::SliderFloat("Блик", &g_lightColor.w, 1.0f, 128.0f);
-    ImGui::End();
+    glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+    float aspect = (float)graphics::internal::context.swapchain_extent.width /
+                    (float)graphics::internal::context.swapchain_extent.height;
+    glm::mat4 proj = glm::perspectiveRH_ZO(glm::radians(g_fov), aspect, 0.1f, 100.0f);
+    proj[1][1] *= -1.0f;
 
     glm::vec3 dir(g_lightDir);
     if (glm::dot(dir, dir) < 1e-6f)
@@ -443,9 +458,11 @@ void update([[maybe_unused]] double time) {
     ubo.proj = proj;
     ubo.mvp = proj * view * model;
     ubo.lightDir = glm::vec4(glm::normalize(dir), 0.0f);
-    ubo.lightColor = g_lightColor;
-    ubo.userColor = g_userColor;
+    ubo.lightColor = glm::vec4(glm::vec3(g_lightColor), g_intensity);
+    ubo.albedo = g_albedo;
     ubo.cameraPos = glm::vec4(cameraPos, 1.0f);
+    ubo.specColor = g_specColor;
+    ubo.ambient = g_ambient;
 
     memcpy(uniformMapped, &ubo, sizeof(ubo));
     vmaFlushAllocation(graphics::internal::context.allocator, uniformAllocation, 0, sizeof(ubo));
