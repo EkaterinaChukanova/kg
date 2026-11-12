@@ -2,7 +2,7 @@
 
 layout(location = 0) in vec3 fragPos;
 layout(location = 1) in vec3 fragNormal;
-layout(location = 2) in vec3 fragColor;
+layout(location = 2) in vec2 fragTexCoord;
 
 layout(location = 0) out vec4 outColor;
 
@@ -11,13 +11,14 @@ layout(binding = 0) uniform UBO {
     mat4 model;
     mat4 view;
     mat4 proj;
-    vec4 albedo;
     vec4 lightDir;
     vec4 lightColor;
     vec4 cameraPos;
     vec4 specColor;
     vec4 ambient;
 } ubo;
+
+layout(binding = 1) uniform sampler2D texSampler;
 
 void main() {
     vec3 N = normalize(fragNormal);
@@ -29,11 +30,15 @@ void main() {
     float shininess = max(ubo.specColor.w, 1.0);
     float spec = pow(max(dot(N, H), 0.0), shininess);
     spec *= step(0.0, dot(N, L));
+
     vec3 light = ubo.lightColor.rgb * ubo.lightColor.w;
 
-    vec3 base = fragColor * ubo.albedo.rgb;
+    // albedo из текстуры
+    vec3 base = texture(texSampler, fragTexCoord).rgb;
+
     vec3 color = ubo.ambient.rgb * base
                + diff * base * light
                + spec * ubo.specColor.rgb * light;
+
     outColor = vec4(color, 1.0);
 }
